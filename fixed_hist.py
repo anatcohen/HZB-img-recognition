@@ -6,11 +6,7 @@ import matplotlib.lines as lines
 # Paths
 # ebsd_path = 'data/EBSD_09-07-29_1415-13_Map1 2 3 4_corr-BC   IPF   GB_crop.tif'
 ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
-real_truth_path = 'fix_affine_reg.png'
-
-# Load Images
-ebsd_img = cv2.imread(ebsd_path)
-truth_img = cv2.imread(real_truth_path)
+real_truth_path = 'data/fix_affine_reg.png'
 
 
 # Reduces the amount of colours in image to k colours
@@ -42,6 +38,8 @@ def create_histogram(x, bin_num, colour):
     plt.legend(handles=[handle])
     plt.show()
 
+    return zip(n, bins, patches)
+
 
 def get_coordinates(image, inf, sup):
     mask = cv2.inRange(image, inf, sup)
@@ -62,12 +60,22 @@ def get_cl_colours(cl_img, coords):
     return flat_cl[flat_coords]
 
 
-# quant_img = quantise_img(ebsd_img, 13)
-# cv2.imwrite('quant13.png', quant_img)
-quant_img = cv2.imread('quant13.png')
-freq_colour = most_freq_colour(quant_img)
-coordinates = get_coordinates(quant_img, freq_colour, freq_colour)
-cl_truth = get_cl_colours(truth_img, coordinates)
-cl_truth = cl_truth[cl_truth != 0]
-create_histogram(cl_truth, 70, freq_colour/255)
+# Returns histogram and freq colours
+def get_data():
+    coordinates = get_coordinates(quant_img, freq_colour - 30, freq_colour + 30)
+    cl_truth = get_cl_colours(truth_img, coordinates)
+    cl_truth = cl_truth[cl_truth != 0]
+    his = create_histogram(cl_truth, 40, freq_colour/255)
+    return freq_colour, his
 
+
+if __name__=="__main__":
+    # Load Images
+    ebsd_img = cv2.imread(ebsd_path)
+    truth_img = cv2.imread(real_truth_path)
+
+    # Calc dominant colours
+    # quant_img = quantise_img(ebsd_img, 13)
+    # cv2.imwrite('quant13.png', quant_img)
+    quant_img = cv2.imread('quant13.png')
+    freq_colour = most_freq_colour(quant_img)
