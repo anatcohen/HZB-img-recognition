@@ -3,6 +3,7 @@ import cv2
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
 
+
 # Paths
 # ebsd_path = 'data/EBSD_09-07-29_1415-13_Map1 2 3 4_corr-BC   IPF   GB_crop.tif'
 ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
@@ -25,7 +26,7 @@ def quantise_img(image, k):
 # To get second colour 1. get max 2. remove from array 3. find new max
 def most_freq_colour(image):
     colours, count = np.unique(image.reshape(-1, image.shape[-1]), axis=0, return_counts=True)
-    return colours[count.argmax()]
+    return np.array(colours[count.argmax()])
 
 
 def create_histogram(arr, bin_num, colour):
@@ -42,6 +43,10 @@ def create_histogram(arr, bin_num, colour):
 
 
 def get_mask_coordinates(image, inf, sup):
+    # Fix range
+    inf = (np.vectorize(lambda i: max(0, i))(inf))
+    sup = (np.vectorize(lambda i: min(i, 255))(sup))
+
     mask = cv2.inRange(image, inf, sup)
     coords = np.column_stack(np.where(mask > 0))
     return coords
@@ -67,13 +72,7 @@ def get_hist(cl_img, ebsd_img, freq_colour, min_colour, max_colour):
     coordinates = get_mask_coordinates(ebsd_img, min_colour, max_colour)
     img_hist = get_colours_by_coords(cl_img, coordinates)
     img_hist = img_hist[img_hist != 0]
-    his = create_histogram(img_hist, 40, freq_colour/255)
-
-    # Option to save histogram:
-    # https://stackoverflow.com/questions/65208104/matplotlib-pyplot-how-to-save-a-histogram-in-a-variable-for-later-access
-    # histogram_list.append(plt.gcf())
-
-    # return freq_colour, his
+    # his = create_histogram(img_hist, 40, freq_colour/255)
     return img_hist
 
 
@@ -95,4 +94,3 @@ def load_images():
 
 if __name__ == "__main__":
     get_basic_data()
-    # pass
