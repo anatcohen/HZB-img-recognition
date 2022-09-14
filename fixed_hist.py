@@ -28,8 +28,8 @@ def most_freq_colour(image):
     return colours[count.argmax()]
 
 
-def create_histogram(x, bin_num, colour):
-    n, bins, patches = plt.hist(x, edgecolor='black', linewidth=1, bins=bin_num)
+def create_histogram(arr, bin_num, colour):
+    n, bins, patches = plt.hist(arr, edgecolor='black', linewidth=1, bins=bin_num)
     for i, bar in enumerate(patches):
         x = ((bins[i] + bins[i + 1])/2)/255
         bar.set_facecolor((x, x, x))
@@ -41,7 +41,7 @@ def create_histogram(x, bin_num, colour):
     return zip(n, bins, patches)
 
 
-def get_coordinates(image, inf, sup):
+def get_mask_coordinates(image, inf, sup):
     mask = cv2.inRange(image, inf, sup)
     coords = np.column_stack(np.where(mask > 0))
     return coords
@@ -51,31 +51,48 @@ def get_coordinates(image, inf, sup):
 #            eg. [1,2,3] = [[1,1,1], [2,2,2], [3,3,3]]
 #            * bc cl is a greyscale, every pixel should have equal R,B,G values
 #            * could cause issues later if cl pixels don't work like that
-def get_cl_colours(cl_img, coords):
-    flat_cl = cl_img.flatten()
+
+# Gets colours of specific coordinates in a greyscale image
+def get_colours_by_coords(img, coords):
+    flat_img = img.flatten()
     flat_coords = coords.flatten()
     col = flat_coords[::2]
     row = flat_coords[1::2]
     flat_coords = col*row
-    return flat_cl[flat_coords]
+    return flat_img[flat_coords]
 
 
 # Returns histogram and freq colours
-def get_data():
-    coordinates = get_coordinates(quant_img, freq_colour - 30, freq_colour + 30)
-    cl_truth = get_cl_colours(truth_img, coordinates)
-    cl_truth = cl_truth[cl_truth != 0]
-    his = create_histogram(cl_truth, 40, freq_colour/255)
-    return freq_colour, his
+def get_hist(cl_img, ebsd_img, freq_colour, min_colour, max_colour):
+    coordinates = get_mask_coordinates(ebsd_img, min_colour, max_colour)
+    img_hist = get_colours_by_coords(cl_img, coordinates)
+    img_hist = img_hist[img_hist != 0]
+    his = create_histogram(img_hist, 40, freq_colour/255)
+
+    # Option to save histogram:
+    # https://stackoverflow.com/questions/65208104/matplotlib-pyplot-how-to-save-a-histogram-in-a-variable-for-later-access
+    # histogram_list.append(plt.gcf())
+
+    # return freq_colour, his
+    return img_hist
 
 
-if __name__=="__main__":
-    # Load Images
+# Returns basic data; frequent colour and histogram
+def get_basic_data():
+    ebsd_img, truth_img, quant_img = load_images()
+    freq_colour = most_freq_colour(quant_img)
+    return freq_colour, get_hist(truth_img, ebsd_img, freq_colour, freq_colour - 30, freq_colour + 30)
+
+
+# Loads ebsd, true registration images and also creates quantised image of ebsd
+def load_images():
     ebsd_img = cv2.imread(ebsd_path)
     truth_img = cv2.imread(real_truth_path)
-
-    # Calc dominant colours
     # quant_img = quantise_img(ebsd_img, 13)
-    # cv2.imwrite('quant13.png', quant_img)
     quant_img = cv2.imread('quant13.png')
-    freq_colour = most_freq_colour(quant_img)
+    return ebsd_img, truth_img, quant_img
+
+
+if __name__ == "__main__":
+    get_basic_data()
+    # pass
