@@ -2,12 +2,17 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
+import pandas as pd
 
 
 # Paths
 # ebsd_path = 'data/EBSD_09-07-29_1415-13_Map1 2 3 4_corr-BC   IPF   GB_crop.tif'
 ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
-real_truth_path = 'data/fix_affine_reg.png'
+real_truth_path = 'data/affine_reg.png'
+orig_cl_path = 'data/CL1415-13_8K_1280nm_8kV_SS33_3000x_900V_1mm_40us_1024x1024.bmp'
+
+white = [225, 225, 225]
+black = [0, 0, 0]
 
 
 # Reduces the amount of colours in image to k colours
@@ -22,15 +27,29 @@ def quantise_img(image, k):
     return final_img
 
 
-# Finds the most frequent colour in image
-# To get second colour 1. get max 2. remove from array 3. find new max
-def most_freq_colour(image):
+# Returns a list of n most frequent colours in img
+def get_n_freq_colours(image, n=1):
     colours, count = np.unique(image.reshape(-1, image.shape[-1]), axis=0, return_counts=True)
-    return np.array(colours[count.argmax()])
+    n = min([len(colours), n])
+    n_colours = []
+
+    while len(n_colours) < n:
+        ind = count.argmax()
+        freq_colour = np.array(colours[ind])
+        # Deleting freq colour from colours and count
+        colours = colours.flatten()
+        colours = np.delete(colours, [ind*3, ind*3 + 1, ind*3 + 2])
+        colours = np.reshape(colours, (-1, 3))
+        count = np.delete(count, ind)
+        if not np.array_equal(freq_colour, black):
+            n_colours.append(freq_colour)
+
+    return np.array(n_colours)
 
 
 def create_histogram(arr, bin_num, colour):
     n, bins, patches = plt.hist(arr, edgecolor='black', linewidth=1, bins=bin_num)
+
     for i, bar in enumerate(patches):
         x = ((bins[i] + bins[i + 1])/2)/255
         bar.set_facecolor((x, x, x))
@@ -39,13 +58,11 @@ def create_histogram(arr, bin_num, colour):
     plt.legend(handles=[handle])
     plt.show()
 
-    return zip(n, bins, patches)
-
 
 def get_mask_coordinates(image, inf, sup):
     # Fix range
-    inf = (np.vectorize(lambda i: max(0, i))(inf))
-    sup = (np.vectorize(lambda i: min(i, 255))(sup))
+    # inf = (np.vectorize(lambda i: max(0, i))(inf))
+    # sup = (np.vectorize(lambda i: min(i, 255))(sup))
 
     mask = cv2.inRange(image, inf, sup)
     coords = np.column_stack(np.where(mask > 0))
@@ -72,14 +89,14 @@ def get_hist(cl_img, ebsd_img, freq_colour, min_colour, max_colour):
     coordinates = get_mask_coordinates(ebsd_img, min_colour, max_colour)
     img_hist = get_colours_by_coords(cl_img, coordinates)
     img_hist = img_hist[img_hist != 0]
-    # his = create_histogram(img_hist, 40, freq_colour/255)
+    # create_histogram(img_hist, 255, freq_colour/255)
     return img_hist
 
 
 # Returns basic data; frequent colour and histogram
 def get_basic_data():
     ebsd_img, truth_img, quant_img = load_images()
-    freq_colour = most_freq_colour(quant_img)
+    freq_colour = get_n_freq_colours(quant_img)[0]
     return freq_colour, get_hist(truth_img, ebsd_img, freq_colour, freq_colour - 30, freq_colour + 30)
 
 
@@ -87,10 +104,48 @@ def get_basic_data():
 def load_images():
     ebsd_img = cv2.imread(ebsd_path)
     truth_img = cv2.imread(real_truth_path)
+    cl_img = cv2.imread(orig_cl_path)
     # quant_img = quantise_img(ebsd_img, 13)
     quant_img = cv2.imread('quant13.png')
-    return ebsd_img, truth_img, quant_img
+    return ebsd_img, truth_img, cl_img, quant_img
 
 
 if __name__ == "__main__":
-    get_basic_data()
+    # get_basic_data()
+    ebsd, truth, cl, quant = load_images()
+    freq_colours = get_n_freq_colours(quant, 6)
+
+    for j in range(6):
+        colour = freq_colours[j]
+        coordinates = get_mask_coordinates(quant, colour, colour)
+        cl_hist = get_colours_by_coords(cl, coordinates)
+        truth_hist = get_colours_by_coords(truth, coordinates)
+        cl_hist = cl_hist[cl_hist != 0]
+        truth_hist = truth_hist[truth_hist != 0]
+
+        fig, axes = plt.subplots(1, 2)
+        n_bins = 150
+        fig, (ax0, ax1) = plt.subplots(nrows=1, ncols=2)
+        handle = lines.Line2D([], [], c=np.array(colour)/255, lw=15)
+
+        n_0, bins_0, patches_0 = ax0.hist(cl_hist, edgecolor='black', linewidth=1, bins=n_bins)
+        ax0.set_title('Unregistered Cl')
+        n_1, bins_1, patches_1 = ax1.hist(truth_hist, edgecolor='black', linewidth=1, bins=n_bins)
+        ax1.set_title('Registered Cl')
+
+        for i, bar in enumerate(patches_0):
+            x = ((bins_0[i] + bins_0[i + 1]) / 2) / 255
+            bar.set_facecolor((x, x, x))
+        for i, bar in enumerate(patches_1):
+            x = ((bins_1[i] + bins_1[i + 1]) / 2) / 255
+            bar.set_facecolor((x, x, x))
+
+        ax0.legend(handles=[handle])
+        ax1.legend(handles=[handle])
+
+        fig.tight_layout()
+        name = 'Histograms/colour' + str(j+1) + '.png'
+        plt.savefig(name)
+        # plt.show()
+
+
