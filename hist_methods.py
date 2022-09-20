@@ -2,16 +2,13 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
-import pandas as pd
-
+from scipy.stats import wasserstein_distance
 
 # Paths
-# ebsd_path = 'data/EBSD_09-07-29_1415-13_Map1 2 3 4_corr-BC   IPF   GB_crop.tif'
 ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
 real_truth_path = 'data/affine_reg.png'
-orig_cl_path = 'data/CL1415-13_8K_1280nm_8kV_SS33_3000x_900V_1mm_40us_1024x1024.bmp'
+orig_cl_path = 'Sequence/cl.png'
 
-white = [225, 225, 225]
 black = [0, 0, 0]
 
 
@@ -110,28 +107,74 @@ def load_images():
     return ebsd_img, truth_img, cl_img, quant_img
 
 
-if __name__ == "__main__":
-    # get_basic_data()
-    ebsd, truth, cl, quant = load_images()
-    freq_colours = get_n_freq_colours(quant, 6)
+def side_by_side_random():
+    random1 = cv2.imread('data/random1.png')
+    random2 = cv2.imread('data/random2.png')
+    random3 = cv2.imread('data/random3.png')
+    random4 = cv2.imread('data/random4.png')
+    # height, width, ch = cl.shape
+
+    # af_1 = np.float32([[1, 0, 1], [0, 1, height - 1000]])
+    # af_2 = np.float32([[1, 0, 1], [0, 1, height - 900]])
+    # af_3 = np.float32([[1, 0, 1], [0, 1, height - 800]])
+    # af_4 = np.float32([[1, 0, 1], [0, 1, height - 700]])
+    # af_5 = np.float32([[1, 0, 1], [0, 1, height - 600]])
+
+    # random1 = cv2.warpAffine(cl, af_1, (width, height))
+    # random2 = cv2.warpAffine(cl, af_2, (width, height))
+    # random3 = cv2.warpAffine(cl, af_3, (width, height))
+    # random4 = cv2.warpAffine(cl, af_4, (width, height))
+    # random4 = cv2.warpAffine(orig_img, af_5, (width, height))
 
     for j in range(6):
         colour = freq_colours[j]
         coordinates = get_mask_coordinates(quant, colour, colour)
+
         cl_hist = get_colours_by_coords(cl, coordinates)
+        random1_hist = get_colours_by_coords(random1, coordinates)
+        random2_hist = get_colours_by_coords(random2, coordinates)
+        random3_hist = get_colours_by_coords(random3, coordinates)
+        random4_hist = get_colours_by_coords(random4, coordinates)
         truth_hist = get_colours_by_coords(truth, coordinates)
+
         cl_hist = cl_hist[cl_hist != 0]
+        random1_hist = random1_hist[random1_hist != 0]
+        random2_hist = random2_hist[random2_hist != 0]
+        random3_hist = random3_hist[random3_hist != 0]
+        random4_hist = random4_hist[random4_hist != 0]
         truth_hist = truth_hist[truth_hist != 0]
 
-        fig, axes = plt.subplots(1, 2)
-        n_bins = 150
-        fig, (ax0, ax1) = plt.subplots(nrows=1, ncols=2)
+        fig, axes = plt.subplots(1, 6)
+        n_bins = 20
+        fig, (ax0, ax1, ax2, ax3, ax4, ax5) = plt.subplots(nrows=1, ncols=6, figsize=(30, 10))
         handle = lines.Line2D([], [], c=np.array(colour)/255, lw=15)
 
-        n_0, bins_0, patches_0 = ax0.hist(cl_hist, edgecolor='black', linewidth=1, bins=n_bins)
-        ax0.set_title('Unregistered Cl')
-        n_1, bins_1, patches_1 = ax1.hist(truth_hist, edgecolor='black', linewidth=1, bins=n_bins)
-        ax1.set_title('Registered Cl')
+        n_0, bins_0, patches_0 = ax0.hist(cl_hist, edgecolor='black', linewidth=1, bins=n_bins, density=True)
+        ax0.set_title('Original Cl')
+        n_1, bins_1, patches_1 = ax1.hist(random1_hist, edgecolor='black', linewidth=1, bins=n_bins, density=True)
+        ax1.set_title('Random 1 Cl')
+        n_2, bins_2, patches_2 = ax2.hist(random2_hist, edgecolor='black', linewidth=1, bins=n_bins, density=True)
+        ax2.set_title('Random 2 Cl')
+        n_3, bins_3, patches_3 = ax3.hist(random3_hist, edgecolor='black', linewidth=1, bins=n_bins, density=True)
+        ax3.set_title('Random 3 Cl')
+        n_4, bins_4, patches_4 = ax4.hist(random4_hist, edgecolor='black', linewidth=1, bins=n_bins, density=True)
+        ax4.set_title('Random 4 Cl')
+        n_5, bins_5, patches_5 = ax5.hist(truth_hist, edgecolor='black', linewidth=1, bins=n_bins, density=True)
+        ax5.set_title('Registered Cl')
+
+        wd0 = str("{:.2f}".format(wasserstein_distance(cl_hist, truth_hist)))
+        wd1 = str("{:.2f}".format(wasserstein_distance(random1_hist, truth_hist)))
+        wd2 = str("{:.2f}".format(wasserstein_distance(random2_hist, truth_hist)))
+        wd3 = str("{:.2f}".format(wasserstein_distance(random3_hist, truth_hist)))
+        wd4 = str("{:.2f}".format(wasserstein_distance(random4_hist, truth_hist)))
+        wd5 = str("{:.2f}".format(wasserstein_distance(truth_hist, truth_hist)))
+
+        ax0.set(xlabel="Wasserstein Distance: " + wd0)
+        ax1.set(xlabel="Wasserstein Distance: " + wd1)
+        ax2.set(xlabel="Wasserstein Distance: " + wd2)
+        ax3.set(xlabel="Wasserstein Distance: " + wd3)
+        ax4.set(xlabel="Wasserstein Distance: " + wd4)
+        ax5.set(xlabel="Wasserstein Distance: " + wd5)
 
         for i, bar in enumerate(patches_0):
             x = ((bins_0[i] + bins_0[i + 1]) / 2) / 255
@@ -139,13 +182,36 @@ if __name__ == "__main__":
         for i, bar in enumerate(patches_1):
             x = ((bins_1[i] + bins_1[i + 1]) / 2) / 255
             bar.set_facecolor((x, x, x))
+        for i, bar in enumerate(patches_2):
+            x = ((bins_1[i] + bins_1[i + 1]) / 2) / 255
+            bar.set_facecolor((x, x, x))
+        for i, bar in enumerate(patches_3):
+            x = ((bins_1[i] + bins_1[i + 1]) / 2) / 255
+            bar.set_facecolor((x, x, x))
+        for i, bar in enumerate(patches_4):
+            x = ((bins_1[i] + bins_1[i + 1]) / 2) / 255
+            bar.set_facecolor((x, x, x))
+        for i, bar in enumerate(patches_5):
+            x = ((bins_1[i] + bins_1[i + 1]) / 2) / 255
+            bar.set_facecolor((x, x, x))
 
         ax0.legend(handles=[handle])
         ax1.legend(handles=[handle])
+        ax2.legend(handles=[handle])
+        ax3.legend(handles=[handle])
+        ax4.legend(handles=[handle])
+        ax5.legend(handles=[handle])
 
         fig.tight_layout()
-        name = 'Histograms/colour' + str(j+1) + '.png'
+        # name = 'Transpose Histograms/Translation X/' + str(j+1) + '.png'
+        name = 'Random Histograms/colour' + str(j+1) + '.png'
         plt.savefig(name)
         # plt.show()
 
+
+if __name__ == "__main__":
+    # get_basic_data()
+    ebsd, truth, cl, quant = load_images()
+    freq_colours = get_n_freq_colours(quant, 6)
+    side_by_side_random()
 
