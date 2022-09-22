@@ -1,113 +1,83 @@
 import numpy as np
-from torch import cumsum, abs, sum
-import hist_methods
+from torch import sum
 import scipy.optimize as opt
 import cv2
 
-# Problems/Questions:
-# 1. Will one frequent colour be enough?
-# 2. Find how to get the right range of frequent colours
-# 3. Find most accurate method
+# Image Paths
+# real_truth_path = 'data/affine_reg.png'
+ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
+orig_cl_path = 'Sequence/cl.png'
+
+# Transformation boundaries
+sup_translation_y = None
+sup_rotation = 90
+sup_x_skew = None
+sup_y_skew = None
+
+# Colour codes
+black = [0, 0, 0]
+white = [255, 255, 255]
+
+# Problems:
+# 1. Each transformation need to be checked both ways
+#    e.g. rotate counter clockwise and anti clockwise,  shift y from bottom and from top ect.
 
 
-def calc_emd(p):
-    x = ref_his - p
-    y = cumsum(x, dim=0)
-    return abs(y).sum()
+# Loads cl and ebsd images by path
+def load_images():
+    ebsd_img = cv2.imread(ebsd_path)
+    # truth_img = cv2.imread(real_truth_path)
+    cl_img = cv2.imread(orig_cl_path)
+    return ebsd_img, cl_img
 
 
-def old_idea():
-    # def find_best_transformation(points, step, min_emd=None, min_trans=None):
-    #     # General idea:
-    #     # Fix three points at a time by order:
-    #     # 1. Fix nw corner
-    #     # 2. Fix ne corner
-    #     # 3. Fix sw corner
-    #     # 4. Fix se corner
-    #     # 5. Calc emd
-    #     # 6. Repeat 4 after and find min emd
-    #     # 7. Repeat 3 and find min emd
-    #     # 8. Repeat 2 and find min emd
-    #     # 9. Repeat 1 and find min emd
-    #
-    #     nw = points[0]  # north-west, north-east, south-west, south-east corners
-    #
-    #     if nw >= height:
-    #         return min_trans
-    #
-    #     new_emd, new_mat = ne_transformation(points, step, min_emd, min_trans)
-    #
-    #     if new_emd < min_emd:
-    #         min_emd = new_emd
-    #         min_mat = new_mat
-    #
-    #     points[0] += step
-    #     return find_best_transformation(points, step, min_emd, min_mat)
+# Generates transformations within given boundaries and step size for translation, rotation and skew transformations
+def generate_transformations(translate_x_bounds, translate_y_bounds, rotate_bounds, skew_x_bounds, skew_y_bounds):
+    # Unpack boundaries
+    min_trans_x, max_trans_x, step_trans_x = translate_x_bounds
+    min_trans_y, max_trans_y, step_trans_y = translate_y_bounds
+    min_rot, max_rot, step_rot = rotate_bounds
+    min_skew_x, max_skew_x, step_skew_x = skew_x_bounds
+    min_skew_y, max_skew_y, step_skew_y = skew_y_bounds
 
-    # def ne_transformation(points, step, min_emd, min_mat):
-    #     if points[1] > width:
-    #         return min_emd, min_mat
-    #
-    #     new_emd, new_mat = sw_transformation(points, min_emd, min_mat)
-    #
-    #     if new_emd < min_emd:
-    #         min_emd = new_emd
-    #         min_mat = new_mat
-    #
-    #     points[1] += step
-    #
-    #     return ne_transformation(points, step, min_emd, min_mat)
-    #
-    #
-    # def sw_transformation(points, step, min_emd, min_mat):
-    #     # if points[2] <
-    #     new_emd, new_mat = se_transformation(points, step, min_emd, min_mat)
-    #     if new_emd < min_emd:
-    #         min_emd = new_emd
-    #         min_mat = new_mat
-    #
-    #     points[2] += step
-    #     return sw_transformation()
-    #
-    #
-    # def se_transformation(points, step, min_emd, min_mat):
-    #     se = points[4]
-    #     if se > width:
-    #         return min_mat
-    #
-    #     trans_mat = cv2.getPerspectiveTransform(*points)
-    #     warp_img = cv2.warpPerspective(cl_img, trans_mat, (width, height))
-    #     mask_img = ''
-    #     trans_his = fixed_hist.get_colours_by_coords(warp_img, mask_img)
-    #     new_emd = calc_emd(trans_his)
-    #
-    #     if min_emd is None or new_emd < min_emd:
-    #         min_emd = new_emd
-    #         min_mat = trans_mat
-    #
-    #     points[4] += step
-    #     return se_transformation(points, step, min_emd, min_mat)
+    n = (max_trans_x-min_trans_y)/ step_trans_x
+    ret_arr = []
+
+    for i in range(n):
+        new_transformations = fix_translation_x(translate_x_bounds, translate_y_bounds, rotate_bounds, skew_x_bounds, skew_y_bounds)
+        ret_arr.append(new_transformations)
+
+    return ret_arr
+
+
+def fix_translation_x(trans_x, translate_y_bounds, rotate_bounds, skew_x_bounds, skew_y_bounds):
     pass
 
 
-def loss_func(points):
-    trans_mat = cv2.getPerspectiveTransform(*points)
-    trans_cl = cv2.warpPerspective(cl_img, trans_mat, (width, height))
-    trans_his = hist_methods.get_hist(trans_cl, ebsd_img, ref_freq_col, ref_freq_col - 50, ref_freq_col + 50)
-    return calc_emd(trans_his)
+def fix_translation_y():
+    pass
 
 
-def find_best_transformation():
-    trans = opt.minimize(calc_emd, [[0, 0], [0, 1024], [1024, 0], [1024, 1024]])
-    print(trans)
+def fix_rotation_x():
+    pass
+
+
+# Converts image array to a 1D binary array of {0,1}
+def convert_img_to_bi(img):
+    flat_arr = img.flatten()
+    ret_arr = flat_arr[::3]
+    # Replace black pixels with 1 and white with 1
+    ret_arr[ret_arr == 0] = 1
+    ret_arr[ret_arr == 255] = 0
+    return ret_arr
+
+
+def loss_func(trans_img, ebsd_img):
+    bi_trans = convert_img_to_bi(trans_img)
+    bi_ebsd = convert_img_to_bi(ebsd_img)
+    return np.sum(bi_trans*bi_ebsd)
 
 
 if __name__ == "__main__":
     # Load Images
-    cl_img, ebsd_img, quant_image = hist_methods.load_images()
-    # Get reference histogram and reference frequent colours
-    ref_freq_col, ref_his = hist_methods.get_basic_data()
-    height, width, ch = cl_img.shape
-
-    find_best_transformation()
-
+    cl_img, ebsd_img = load_images()
