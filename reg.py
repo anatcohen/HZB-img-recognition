@@ -63,8 +63,7 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
     rot_range = list(range(min_rot, max_rot, rot_step))
     a = [trans_x_range, trans_y_range, rot_range]
 
-    ret_arr = list(itertools.product(*a))
-    print(ret_arr)
+    return list(itertools.product(*a))
 
 
 # Calculates the loss of each transformation in trans_arr
