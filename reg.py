@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import itertools
 
 # Image Paths
 # real_truth_path = 'data/affine_reg.png'
@@ -14,9 +15,9 @@ sup_y_skew = None
 
 # Initial bounds
 # Change later to (-sup, sup, step)
-TRANS_X_BOUNDS = (-100, 100, 20)
-TRANS_Y_BOUNDS = (-100, 100, 20)
-ROT_BOUNDS = (-40, 40, 20)
+TRANS_X_BOUNDS = (-100, 120, 20)
+TRANS_Y_BOUNDS = (-100, 120, 20)
+ROT_BOUNDS = (-40, 60, 20)
 SKEW_X_BOUNDS = (0, 0, 0)
 SKEW_Y_BOUNDS = (0, 0, 0)
 
@@ -53,54 +54,17 @@ def load_images():
 def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_bounds=TRANS_Y_BOUNDS,
                              rotate_bounds=ROT_BOUNDS, skew_x_bounds=SKEW_X_BOUNDS, skew_y_bounds=SKEW_Y_BOUNDS):
     # Unpack boundaries
-    min_trans_x, max_trans_x, step = translate_x_bounds
+    min_trans_x, max_trans_x, trans_x_step = translate_x_bounds
+    min_trans_y, max_trans_y, trans_y_step = translate_y_bounds
+    min_rot, max_rot, rot_step = rotate_bounds
 
-    n = (max_trans_x-min_trans_x) // step
-    ret_arr = []
+    trans_x_range = list(range(min_trans_x, max_trans_x + trans_x_step, trans_x_step))
+    trans_y_range = list(range(min_trans_y, max_trans_y + trans_y_step, trans_y_step))
+    rot_range = list(range(min_rot, max_rot, rot_step))
+    a = [trans_x_range, trans_y_range, rot_range]
 
-    for i in range(n):
-        new_transformations = fix_translation_x(min_trans_x + i*step, translate_y_bounds,
-                                                rotate_bounds, skew_x_bounds, skew_y_bounds)
-        ret_arr.extend(new_transformations)
-
-    return ret_arr
-
-
-def fix_translation_x(trans_x, translate_y_bounds, rotate_bounds, skew_x_bounds, skew_y_bounds):
-    min_trans_y, max_trans_y, step = translate_y_bounds
-    n = (max_trans_y - min_trans_y) // step
-    ret_arr = []
-
-    for i in range(n):
-        new_transformations = fix_translation_y(trans_x, min_trans_y + i*step,
-                                                rotate_bounds, skew_x_bounds, skew_y_bounds)
-        ret_arr.extend(new_transformations)
-
-    return ret_arr
-
-
-def fix_translation_y(trans_x, trans_y, rotate_bounds, skew_x_bounds, skew_y_bounds):
-    min_rot, max_rot, step = rotate_bounds
-    n = (max_rot - min_rot) // step
-    ret_arr = []
-
-    for i in range(n):
-        new_transformations = fix_rotation(trans_x, trans_y, min_rot + i*step, skew_x_bounds, skew_y_bounds)
-        ret_arr.append(new_transformations)
-
-    return ret_arr
-
-
-def fix_rotation(trans_x, trans_y, rot, skew_x_bounds, skew_y_bounds):
-    return [trans_x, trans_y, rot]
-
-
-def fix_skew_x():
-    pass
-
-
-def fix_skew_y():
-    pass
+    ret_arr = list(itertools.product(*a))
+    print(ret_arr)
 
 
 # Calculates the loss of each transformation in trans_arr
@@ -166,7 +130,7 @@ def find_best_trans(n=1):
     # Gets initial transformation options and their loss values
     transformations = generate_transformations()
     best_trans = calc_best_trans(transformations, n)
-    return find_best_trans_helper(best_trans, 2)
+    return find_best_trans_helper(best_trans, 3)
 
 
 def find_best_trans_helper(trans_arr, n, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS,
@@ -235,7 +199,6 @@ if __name__ == "__main__":
 
     # Find initial best transformations
     # Enhance each transformation; repeat process for each transformation by setting the boundaries accordingly;
-    #
 
-    bes = find_best_trans()
-    print(len(bes))
+    # bes = find_best_trans()
+    # print(len(bes))
