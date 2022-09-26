@@ -1,9 +1,10 @@
 import numpy as np
 import cv2
 import itertools
+from hist_methods import quantise_img
 
 # Image Paths
-# real_truth_path = 'data/affine_reg.png'
+truth_path = 'data/affine_reg.png'
 ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
 orig_cl_path = 'Sequence/cl.png'
 
@@ -14,32 +15,23 @@ sup_x_skew = None
 sup_y_skew = None
 
 # Initial bounds
-# Change later to (-sup, sup, step)
-TRANS_X_BOUNDS = (-100, 120, 20)
-TRANS_Y_BOUNDS = (-100, 120, 20)
-ROT_BOUNDS = (-40, 60, 20)
+TRANS_X_BOUNDS = (-100, 100, 20)
+TRANS_Y_BOUNDS = (-100, 100, 20)
+ROT_BOUNDS = (-20, 20, 5)
 SKEW_X_BOUNDS = (0, 0, 0)
 SKEW_Y_BOUNDS = (0, 0, 0)
 
-DIFF_VAL = 50000
 
-# Colour codes
-black = [0, 0, 0]
-white = [255, 255, 255]
-
-# Problems/ Questions/ Remarks:
-# 1. Each transformation need to be checked both ways
-#           e.g. rotate counterclockwise and anticlockwise,  shift y from bottom and from top ect.
-# 2. How to convert trans values to matrix
-# 3. Stop condition on enhancing  transformation values
-#           * number of iterations as a parameter?
-#           * when loss is close enough to loss of ebsd? what do img to I compare to? ebsd_canny has to many lines
-# 4. How to enhance (Set new boundaries to fit those values?)
+# Problems/Questions/Remarks:
 # 5. Make sure to use numpy arrays when needed
 # 6. Not sure how to implement skew values, should I opt for guessing 4 points for perspective warp?
-# 7. helper functions for generate transformation are repetitive but with different parameters, is there a way to
-#           generalise them to one function?
 # 8. More elegant way to get transformations by indexes in find_best_trans?
+# 9. Change boundary constant to (-sup, sup, step) form
+# 13. Search span is limited because of the new transformation boundaries defined by old val -+ step
+# 14. Is it better to filter best_trans by loss func on the go?
+#       * Apply loss_func (which is slow) once on a very large array
+#                       VS
+#       * Apply every iteration?
 
 
 # Loads cl and ebsd images by path
@@ -48,6 +40,41 @@ def load_images():
     # truth_img = cv2.imread(real_truth_path)
     cl = cv2.imread(orig_cl_path)
     return ebsd, cl
+
+
+#  Returns the borders detected in image using canny method
+def get_canny_img(img):
+    # img = quantise_img(img, 8)
+    grey_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = cv2.GaussianBlur(grey_img, (5, 5), 0)
+
+    high_thresh, thresh_im = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    low_thresh = 0.5 * high_thresh
+
+    edges = cv2.Canny(img, low_thresh, high_thresh)
+
+    return edges
+
+
+# Returns canny image of cl after having had given transformation applied to it
+def create_trans_img(trans):
+    translate_x, translate_y, degree = trans
+    # Translation
+    translation_mat = np.float32([[1, 0, translate_x], [0, 1, translate_y]])
+    img = cv2.warpAffine(cl_canny, translation_mat, (width, height))
+    # Rotation
+    rot_mat = cv2.getRotationMatrix2D((cX, cY), degree, 1.0)
+    trans_img = cv2.warpAffine(img, rot_mat, (width, height))
+    return trans_img
+
+
+# Converts image array to a 1D binary array of {0,1}
+def convert_canny_to_bi(img):
+    flat_arr = img.flatten()
+    # Replace black pixels with 1 and white with 1
+    flat_arr[flat_arr == 0] = 1
+    flat_arr[flat_arr != 1] = 0
+    return flat_arr
 
 
 # Generates transformations within given boundaries and step size for translation, rotation and skew transformations
@@ -66,116 +93,58 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
     return list(itertools.product(*a))
 
 
-# Calculates the loss of each transformation in trans_arr
-def calc_loss(trans_arr):
-    cl_canny = get_canny_img(cl_img)
-    loss_arr = []
-    height, width = cl_canny.shape
-    (cX, cY) = (width // 2, height // 2)
+def find_best_trans(n=1):
+    # Gets initial transformation options and their loss values
+    init_trans = generate_transformations()
+    best_trans = find_best_trans_helper(init_trans, n)
+    # return find_best_trans_helper(best_trans, 1)
+    best_trans = calc_best_trans(best_trans)
+    return best_trans
+
+
+def find_best_trans_helper(trans_arr, n, trans_x_step=TRANS_X_BOUNDS[2], trans_y_step=TRANS_Y_BOUNDS[2],
+                           rot_step=ROT_BOUNDS[2], skew_x_step=SKEW_X_BOUNDS[2], skew_y_step=SKEW_Y_BOUNDS[2]):
+    if trans_x_step <= 1 and trans_y_step <= 1 and rot_step <= 1:
+        return trans_arr
+
+    best_trans = []
+
+    # New transformation steps
+    new_trans_x_step = trans_x_step//2 if trans_x_step//2 >= 1 else 1
+    new_trans_y_step = trans_y_step//2 if trans_y_step//2 >= 1 else 1
+    new_rot_step = rot_step//2 if rot_step//2 >= 1 else 1
 
     for trans in trans_arr:
-        translate_x, translate_y, rotate = trans
-        # Translation
-        translation_mat = np.float32([[1, 0, translate_x], [0, 1, translate_y]])
-        img = cv2.warpAffine(cl_canny, translation_mat, (width, height))
-        # Rotation
-        rot_mat = cv2.getRotationMatrix2D((cX, cY), rotate, 1.0)
-        trans_img = cv2.warpAffine(img, rot_mat, (width, height))
-        # Calc loss
-        loss_val = loss_func(trans_img)
-        loss_arr.append(loss_val)
+        # Previous transformation data
+        x, y, rot = trans
+        # *** Problem here- x+_ step limits the search span
+        trans_x_bounds = (x - new_trans_x_step, x + new_trans_x_step, new_trans_x_step)
+        trans_y_bounds = (y - new_trans_y_step, y + new_trans_y_step, new_trans_y_step)
+        rot_bounds = (rot - new_rot_step, rot + new_rot_step, new_rot_step)
+        # New transformations
+        new_trans = generate_transformations(trans_x_bounds, trans_y_bounds, rot_bounds, skew_x_step, skew_y_step)
+        best_trans.extend(new_trans)
 
-    return np.array(loss_arr)
+    best_trans = calc_best_trans(best_trans, n)
+    return find_best_trans_helper(best_trans, n, new_trans_x_step, new_trans_y_step, new_rot_step, skew_x_step, skew_y_step)
 
 
-# Sums the multiplication of the transposed canny and ebsd canny. The higher the better
-def loss_func(trans_img):
+# Calculates the loss of each transformation in trans_arr
+def loss_func(trans_arr):
+    return np.array([loss_func_helper(trans) for trans in trans_arr])
+
+
+# Sums the multiplication of the transposed canny and ebsd canny. The higher, the better
+def loss_func_helper(trans):
+    trans_img = create_trans_img(trans)
     bi_trans = convert_canny_to_bi(trans_img)
     bi_ebsd = convert_canny_to_bi(ebsd_canny)
     return np.sum(bi_trans*bi_ebsd)
 
 
-# Converts image array to a 1D binary array of {0,1}
-def convert_canny_to_bi(img):
-    flat_arr = img.flatten()
-    # Replace black pixels with 1 and white with 1
-    flat_arr[flat_arr == 0] = 1
-    flat_arr[flat_arr != 1] = 0
-    return flat_arr
-
-
-#  Returns the borders detected in image using canny method
-def get_canny_img(img):
-    grey_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    high_thresh, thresh_im = cv2.threshold(grey_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    low_thresh = 0.5 * high_thresh
-
-    edges = cv2.Canny(grey_img, low_thresh, high_thresh)
-    # cv2.imshow('2', edges)
-    # cv2.waitKey()
-    return edges
-
-
-def calc_diff(img):
-    return abs(loss_func(img) - loss_func(ebsd_img))
-
-
-def find_best_trans(n=1):
-    # Stop condition
-    # if calc_diff(trans) < DIFF_VAL:
-    #      return trans
-
-    # Gets initial transformation options and their loss values
-    transformations = generate_transformations()
-    best_trans = calc_best_trans(transformations, n)
-    return find_best_trans_helper(best_trans, 3)
-
-
-def find_best_trans_helper(trans_arr, n, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS,
-                           rot_bounds=ROT_BOUNDS, skewx_bounds=SKEW_X_BOUNDS, skewy_bounds=SKEW_Y_BOUNDS):
-    # Need a stop condition
-    # Stop if all children transformation are off
-    # Possibly also a filter so that the return arr isn't too large
-
-    # if calc_diff(trans_arr) <= DIFF_VAL:
-    #   return trans_arr
-
-    best_trans = []
-
-    for trans in trans_arr:
-        # Previous transformation data
-        x, y, rot = trans
-        prev_x_step = trans_x_bounds[2]
-        prev_y_step = trans_y_bounds[2]
-        prev_rot_step = rot_bounds[2]
-        # New transformation boundaries
-        x_step = prev_x_step//2 if prev_x_step//2 >= 1 else prev_x_step
-        y_step = prev_y_step//2 if prev_y_step//2 >= 1 else prev_y_step
-        rot_step = prev_rot_step//2 if prev_rot_step//2 >= 1 else prev_rot_step
-        # x_step = trans_x_bounds[2]/2
-        # y_step = trans_y_bounds[2]/2
-        # rot_step = rot_bounds[2]/2
-
-        # if x_step == prev_x_step and y_step == prev_y_step and rot_step == prev_rot_step:
-        #   STOP
-        if x_step != prev_x_step or y_step != prev_y_step or rot_step != prev_rot_step:
-            trans_x_bounds = (x - x_step, x + x_step, x_step)
-            trans_y_bounds = (y - y_step, y + y_step, y_step)
-            rot_bounds = (rot - rot_step, rot + rot_step, rot_step)
-            # New transformations
-            # Currently has no stop condition so will not surpass this line
-            new_trans = generate_transformations(trans_x_bounds, trans_y_bounds, rot_bounds, skewx_bounds, skewy_bounds)
-            # Plan B stop condition: if step < 1 (pixel)
-            new_best_trans = calc_best_trans(new_trans, n)
-            print(new_best_trans)
-            best_trans.append(new_best_trans)
-    return best_trans
-
-
 # Returns n transformations from trans_arr with the highest loss values
 def calc_best_trans(trans_arr, n=1):
-    trans_loss = calc_loss(trans_arr)
+    trans_loss = loss_func(trans_arr)
     top_ind = np.argsort(trans_loss)[-n:]
     best_trans = []
     # Remark 8- make more elegant
@@ -187,17 +156,35 @@ def calc_best_trans(trans_arr, n=1):
 
 if __name__ == "__main__":
     # Load Images
-    cl_img, ebsd_img = load_images()
+    ebsd_img, cl_img = load_images()
     ebsd_canny = get_canny_img(ebsd_img)
+    quant = quantise_img(cl_img, 8)
+    cl_canny = get_canny_img(quant)
+
+    # Image dimensions
+    height, width, ch = cl_img.shape
+    (cX, cY) = (width // 2, height // 2)
 
     # Steps:
-    # 1. Generate transformation
-    # 2. Calc loss
-    # 3. Find 5(?) max losses
-    # 4. Enhance transformation on best loss and repeat
+    # 1. Generate initial transformation
+    # 2. Find top n losses of initial transformation
+    # 3. Generate new transformations from the top n losses
+    #       - Reduce Step and size and adjust boundaries around n transformation values
+    #       - Pick best m transformations from them
+    #       - Repeat
+    # 4. Options:
+    #       1. Filter and reduce num of transformations on the way
+    #       2. Leave as is and calc loss of all best transformations
+    #    Best to filter on the go because loss func is slow on large array
+    # 5. Stop when:
+    #       1. Step size is down to 1pixel in all aspects
 
-    # Find initial best transformations
-    # Enhance each transformation; repeat process for each transformation by setting the boundaries accordingly;
+    transformation = find_best_trans()
+    print(transformation)
 
-    # bes = find_best_trans()
-    # print(len(bes))
+    # Results: (-137, -137, -19)
+    # translation_mat = np.float32([[1, 0, -137], [0, 1, -137]])
+    # img = cv2.warpAffine(cl_img, translation_mat, (width, height))
+    # rot_mat = cv2.getRotationMatrix2D((cX, cY), -19, 1.0)
+    # trans_img = cv2.warpAffine(img, rot_mat, (width, height))
+    # cv2.imwrite('C:/Users/Admin/Documents/Helmholtz/Prep Code/init_res.png', trans_img)
