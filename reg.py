@@ -10,14 +10,14 @@ orig_cl_path = 'Sequence/cl.png'
 
 # Transformation boundaries
 sup_translation_y = None
-sup_rotation = 90
+sup_rotation = 45
 sup_x_skew = None
 sup_y_skew = None
 
 # Initial bounds
 TRANS_X_BOUNDS = (-100, 100, 20)
 TRANS_Y_BOUNDS = (-100, 100, 20)
-ROT_BOUNDS = (-20, 20, 5)
+ROT_BOUNDS = (-20, 0, 5)
 SKEW_X_BOUNDS = (0, 0, 0)
 SKEW_Y_BOUNDS = (0, 0, 0)
 
@@ -44,16 +44,17 @@ def load_images():
 
 #  Returns the borders detected in image using canny method
 def get_canny_img(img):
-    # img = quantise_img(img, 8)
     grey_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img = cv2.GaussianBlur(grey_img, (5, 5), 0)
 
     high_thresh, thresh_im = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     low_thresh = 0.5 * high_thresh
-
     edges = cv2.Canny(img, low_thresh, high_thresh)
 
-    return edges
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    dilate = cv2.dilate(edges, kernel, iterations=3)
+
+    return dilate
 
 
 # Returns canny image of cl after having had given transformation applied to it
@@ -136,10 +137,14 @@ def loss_func(trans_arr):
 
 # Sums the multiplication of the transposed canny and ebsd canny. The higher, the better
 def loss_func_helper(trans):
+    # trans_img = create_trans_img(trans)
+    # bi_trans = convert_canny_to_bi(trans_img)
+    # bi_ebsd = convert_canny_to_bi(ebsd_canny)
+    # return np.sum(bi_trans*bi_ebsd)
     trans_img = create_trans_img(trans)
-    bi_trans = convert_canny_to_bi(trans_img)
-    bi_ebsd = convert_canny_to_bi(ebsd_canny)
-    return np.sum(bi_trans*bi_ebsd)
+    intersect_canny = trans_img & ebsd_canny
+    bi_inter_canny = convert_canny_to_bi(intersect_canny)
+    return np.sum(bi_inter_canny)
 
 
 # Returns n transformations from trans_arr with the highest loss values
@@ -157,34 +162,22 @@ def calc_best_trans(trans_arr, n=1):
 if __name__ == "__main__":
     # Load Images
     ebsd_img, cl_img = load_images()
+
+    # Canny Images
     ebsd_canny = get_canny_img(ebsd_img)
     quant = quantise_img(cl_img, 8)
     cl_canny = get_canny_img(quant)
 
     # Image dimensions
-    height, width, ch = cl_img.shape
+    height, width = cl_canny.shape
     (cX, cY) = (width // 2, height // 2)
-
-    # Steps:
-    # 1. Generate initial transformation
-    # 2. Find top n losses of initial transformation
-    # 3. Generate new transformations from the top n losses
-    #       - Reduce Step and size and adjust boundaries around n transformation values
-    #       - Pick best m transformations from them
-    #       - Repeat
-    # 4. Options:
-    #       1. Filter and reduce num of transformations on the way
-    #       2. Leave as is and calc loss of all best transformations
-    #    Best to filter on the go because loss func is slow on large array
-    # 5. Stop when:
-    #       1. Step size is down to 1pixel in all aspects
 
     transformation = find_best_trans()
     print(transformation)
 
-    # Results: (-137, -137, -19)
-    # translation_mat = np.float32([[1, 0, -137], [0, 1, -137]])
+    # Results: (-105, -118, 0)
+    # translation_mat = np.float32([[1, 0, -105], [0, 1, -118]])
     # img = cv2.warpAffine(cl_img, translation_mat, (width, height))
-    # rot_mat = cv2.getRotationMatrix2D((cX, cY), -19, 1.0)
-    # trans_img = cv2.warpAffine(img, rot_mat, (width, height))
-    # cv2.imwrite('C:/Users/Admin/Documents/Helmholtz/Prep Code/init_res.png', trans_img)
+    # rot_mat = cv2.getRotationMatrix2D((cX, cY), 0, 1.0)
+    # tran = cv2.warpAffine(img, rot_mat, (width, height))
+    # cv2.imwrite('C:/Users/Admin/Documents/Helmholtz/Prep Code/init_res.png', tran)
