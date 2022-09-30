@@ -1,8 +1,9 @@
 import numpy as np
 import cv2
-import itertools
-from hist_methods import quantise_img
+from cv2 import warpAffine, getRotationMatrix2D
+from itertools import product
 import multiprocessing as mp
+import time
 
 # Image Paths
 truth_path = 'data/affine_reg.png'
@@ -34,10 +35,6 @@ STEP = 2
 # Problems/Questions/Remarks:
 # 8. More elegant way to get transformations by indexes in find_best_trans?
 # 9. Change boundary constant to (-sup, sup, step) form
-# 14. Is it better to filter best_trans by loss func on the go?
-#       * Apply loss_func (which is slow) once on a very large array
-#                       VS
-#       * Apply every iteration?
 # 15. Implement multiprocessing
 # 16. Stop condition for scale value? <= 0.01?
 
@@ -79,10 +76,10 @@ def create_trans_img(trans):
     translate_x, translate_y, degree, scale_x, scale_y = trans
     # Translation
     translation_mat = np.float32([[scale_x, 0, translate_x], [0, scale_y, translate_y]])
-    img = cv2.warpAffine(cl_canny, translation_mat, (width, height))
+    img = warpAffine(cl_canny, translation_mat, (width, height))
     # Rotation
-    rot_mat = cv2.getRotationMatrix2D((cX, cY), degree, 1.0)
-    trans_img = cv2.warpAffine(img, rot_mat, (width, height))
+    rot_mat = getRotationMatrix2D((cX, cY), degree, 1.0)
+    trans_img = warpAffine(img, rot_mat, (width, height))
     return trans_img
 
 
@@ -112,7 +109,7 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
     scale_y_range = np.arange(min_scale_y, max_scale_y, scale_y_step)
     a = [trans_x_range, trans_y_range, rot_range, scale_x_range, scale_y_range]
 
-    return list(itertools.product(*a))
+    return list(product(*a))
 
 
 # Finds the best transformation for the registration according to the LOSS function
@@ -179,7 +176,7 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
 
 # Returns loss val of each transformation in input array
 def loss_func(trans_arr):
-    # results = pool.map(loss_func_helper, [trans for trans in trans_arr])
+    # results = [pool.apply(loss_func_helper, args=(ebsd_canny, cl_canny, trans)) for trans in trans_arr]
     # return results
     return np.array([loss_func_helper(trans) for trans in trans_arr])
 
@@ -214,8 +211,14 @@ if __name__ == "__main__":
     (cX, cY) = (width // 2, height // 2)
 
     # pool = mp.Pool(mp.cpu_count() - 1)
-    transformation = find_best_trans(1)
+    st = time.time()
+
+    transformation = find_best_trans()
     print(transformation)
+
+    et = time.time()
+    elapsed_time = et - st
+    print('Execution time:', elapsed_time, 'seconds')
     # pool.close()
 
     # trans_arr = generate_transformations((-120, 120, 1), (-120, 120, 1), (-10, 10, 1))
