@@ -41,6 +41,7 @@ STEP = 2
 # 18. make sure skew = 0 is  not possible
 # 19. bad skewing values result in a black image
 
+
 # Loads cl and ebsd images by path
 def load_images():
     ebsd = cv2.imread(ebsd_path)
@@ -235,7 +236,7 @@ def calc_best_trans(trans_arr, n=1):
     # Remark 8- make more elegant
     for i in top_ind:
         best_trans.append((trans_arr[i]))
-        print(trans_loss[i])
+        # print(trans_loss[i])
 
     return best_trans
 
