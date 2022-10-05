@@ -38,7 +38,8 @@ STEP = 2
 # 9. Change boundary constant to (-sup, sup, step) form
 # 15. Implement multiprocessing
 # 17. plot losses
-
+# 18. make sure skew = 0 is  not possible
+# 19. bad skewing values result in a black image
 
 # Loads cl and ebsd images by path
 def load_images():
@@ -87,8 +88,6 @@ def create_trans_img(trans, cl_canny, dim):
     # Rotation
     rot_mat = getRotationMatrix2D((cX, cY), degree, 1.0)
     trans_img = warpAffine(img, rot_mat, (width, height))
-    # cv2.imshow('1', trans_img)
-    # cv2.waitKey(0)
     return trans_img
 
 
@@ -114,8 +113,10 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
     trans_x_range = list(range(min_trans_x, max_trans_x + trans_x_step, trans_x_step))
     trans_y_range = list(range(min_trans_y, max_trans_y + trans_y_step, trans_y_step))
     rot_range = list(range(min_rot, max_rot, rot_step))
-    scale_x_range = np.arange(min_scale_x, max_scale_x, scale_x_step)
-    scale_y_range = np.arange(min_scale_y, max_scale_y, scale_y_step)
+    scale_x_range = np.arange(min_scale_x, max_scale_x + scale_x_step, scale_x_step)
+    scale_x_range = scale_x_range[scale_x_range != 0]
+    scale_y_range = np.arange(min_scale_y, max_scale_y + scale_y_step, scale_y_step)
+    scale_y_range = scale_y_range[scale_y_range != 0]
     a = [trans_x_range, trans_y_range, rot_range, scale_x_range, scale_y_range]
 
     return list(product(*a))
@@ -129,7 +130,7 @@ def find_best_trans(n=1):
 
 
 def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS, rot_bounds=ROT_BOUNDS,
-                           scale_x_bounds=SCALE_X_BOUNDS, scale_y_bounds=SCALE_Y_BOUNDS):
+              scale_x_bounds=SCALE_X_BOUNDS, scale_y_bounds=SCALE_Y_BOUNDS):
     prev_trans_x_step = trans_x_bounds[STEP]
     prev_trans_y_step = trans_y_bounds[STEP]
     prev_rot_step = rot_bounds[STEP]
@@ -158,6 +159,7 @@ def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS,
     return np.unique(ret_trans, axis=0)
 
 
+# Defines new boundaries for next generation of possible transformations
 def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step, scale_y_step):
     x, y, deg, scale_x, scale_y = trans
     new_trans_x_inf = max(x-trans_x_step, -SUP_TRANSLATE_X)
@@ -185,15 +187,14 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
 
 # Returns loss val of each transformation in input array
 def get_arr_loss(trans_arr):
-    # res = (trans, cl_canny, bi_ebsd) = ((int, int, int), np, np)
+    # Zipping the global arguments for multiprocessing to work
     cl_arr = [cl_canny]*len(trans_arr)
     bi_arr = [bi_ebsd]*len(trans_arr)
     dim = [(width, height, cX, cY)]*len(trans_arr)
-    val = list(zip(trans_arr, cl_arr, bi_arr, dim))
+    args = list(zip(trans_arr, cl_arr, bi_arr, dim))
 
-    with Pool() as pool:
-        # results = [pool.apply(loss_func, args=(trans)) for trans in trans_arr]
-        results = pool.starmap(loss_func, val)
+    with Pool(mp.cpu_count() - 1) as pool:
+        results = pool.starmap(loss_func, args)
     return results
     # return np.array([loss_func(trans) for trans in trans_arr])
 
@@ -204,7 +205,6 @@ def loss_func(trans, cl_canny, bi_ebsd, dim):
     # trans_img = create_trans_img(trans)
     trans_img = create_trans_img(trans, cl_canny, dim)
     bi_trans = convert_canny_to_bi(trans_img)
-    # bi_ebsd = convert_canny_to_bi(ebsd_canny)
     loss = np.sum(bi_ebsd*bi_trans)
     # if sum(bi_ebsd) - loss < 25:
     #     loss = 0
@@ -229,11 +229,13 @@ def loss_func(trans, cl_canny, bi_ebsd, dim):
 # Returns n transformations from trans_arr with the highest loss values
 def calc_best_trans(trans_arr, n=1):
     trans_loss = get_arr_loss(trans_arr)
-    top_ind = np.argsort(trans_loss)[-n:]
+    # top_ind = np.argsort(trans_loss)[-n:]
+    top_ind = np.argsort(trans_loss)[:n]
     best_trans = []
     # Remark 8- make more elegant
     for i in top_ind:
-        best_trans.append(trans_arr[i])
+        best_trans.append((trans_arr[i]))
+        print(trans_loss[i])
 
     return best_trans
 
@@ -280,11 +282,8 @@ if __name__ == "__main__":
     (cX, cY) = (width // 2, height // 2)
 
     # Custom Scheduled Optimisation
-    transformation = find_best_trans()
+    transformation = find_best_trans(3)
     print(transformation)
-
-    # res; [40. ,  0. , -3. ,  1. ,  0.8]
-    # test([40. ,  0. , -3. ,  1. ,  0.8])
 
     # Basin-Hopping Optimisation
     # c1 = {'type': 'ineq', 'fun': lambda x: 1.5 - x[4]}
