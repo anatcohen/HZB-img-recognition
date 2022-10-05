@@ -2,8 +2,9 @@ import numpy as np
 import cv2
 from cv2 import warpAffine, getRotationMatrix2D
 from itertools import product
+from scipy.optimize import dual_annealing, basinhopping
+from multiprocessing import Pool
 import multiprocessing as mp
-import time
 
 # Image Paths
 truth_path = 'data/affine_reg.png'
@@ -22,7 +23,7 @@ SUP_SCALE_Y = 1.5
 
 # Initial bounds
 TRANS_X_BOUNDS = (-120, 120, 10)
-TRANS_Y_BOUNDS = (-110, 120, 10)
+TRANS_Y_BOUNDS = (-120, 120, 10)
 ROT_BOUNDS = (-15, 15, 3)
 SCALE_X_BOUNDS = (0.8, 1.2, 0.2)
 SCALE_Y_BOUNDS = (0.8, 1.2, 0.2)
@@ -36,7 +37,7 @@ STEP = 2
 # 8. More elegant way to get transformations by indexes in find_best_trans?
 # 9. Change boundary constant to (-sup, sup, step) form
 # 15. Implement multiprocessing
-# 16. Stop condition for scale value? <= 0.01?
+# 17. plot losses
 
 
 # Loads cl and ebsd images by path
@@ -74,12 +75,18 @@ def get_canny_images():
 # Returns canny image of cl after having had given transformation applied to it
 def create_trans_img(trans):
     translate_x, translate_y, degree, scale_x, scale_y = trans
+    # translate_x, translate_y, degree = trans
+    scale_x = scale_y = 1
     # Translation
     translation_mat = np.float32([[scale_x, 0, translate_x], [0, scale_y, translate_y]])
     img = warpAffine(cl_canny, translation_mat, (width, height))
+    # cv2.imshow('0', img)
+
     # Rotation
     rot_mat = getRotationMatrix2D((cX, cY), degree, 1.0)
     trans_img = warpAffine(img, rot_mat, (width, height))
+    # cv2.imshow('1', trans_img)
+    # cv2.waitKey(0)
     return trans_img
 
 
@@ -114,12 +121,12 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
 
 # Finds the best transformation for the registration according to the LOSS function
 def find_best_trans(n=1):
-    best_trans = find_best_trans_helper(n)
+    best_trans = optimiser(n)
     ret_trans = calc_best_trans(best_trans)
     return ret_trans
 
 
-def find_best_trans_helper(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS, rot_bounds=ROT_BOUNDS,
+def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS, rot_bounds=ROT_BOUNDS,
                            scale_x_bounds=SCALE_X_BOUNDS, scale_y_bounds=SCALE_Y_BOUNDS):
     prev_trans_x_step = trans_x_bounds[STEP]
     prev_trans_y_step = trans_y_bounds[STEP]
@@ -141,7 +148,7 @@ def find_best_trans_helper(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TR
         new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds, new_scale_y_bounds = \
             get_new_boundaries(trans, prev_trans_x_step, prev_trans_y_step, prev_rot_step, prev_scale_x_step,
                                prev_scale_y_step)
-        new_trans = find_best_trans_helper(n, new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds,
+        new_trans = optimiser(n, new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds,
                                            new_scale_y_bounds)
         ret_trans.extend(new_trans)
 
@@ -175,23 +182,43 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
 
 
 # Returns loss val of each transformation in input array
-def loss_func(trans_arr):
-    # results = [pool.apply(loss_func_helper, args=(ebsd_canny, cl_canny, trans)) for trans in trans_arr]
+def get_arr_loss(trans_arr):
+    # results = [pool.apply(loss_func, args=(ebsd_canny, cl_canny, trans)) for trans in trans_arr]
+    with Pool() as pool:
+        return pool.map(loss_func, trans_arr)
     # return results
-    return np.array([loss_func_helper(trans) for trans in trans_arr])
+    # return np.array([loss_func(trans) for trans in trans_arr])
 
 
 # Sums the multiplication of the transposed canny and ebsd canny. The higher, the better
-def loss_func_helper(trans):
+def loss_func(trans):
     trans_img = create_trans_img(trans)
     bi_trans = convert_canny_to_bi(trans_img)
-    bi_ebsd = convert_canny_to_bi(ebsd_canny)
-    return np.sum(bi_ebsd*bi_trans)
+    # bi_ebsd = convert_canny_to_bi(ebsd_canny)
+    loss = np.sum(bi_ebsd*bi_trans)
+    # if sum(bi_ebsd) - loss < 25:
+    #     loss = 0
+    return loss*-1
+
+# Simulated Annealing Optimiser LOSS function
+# def loss_func(pts):
+#     p1_r, p1_c, p2_r, p2_c, p3_r, p3_c, p4_r, p4_c = pts
+#     coord1 = np.array([[p1_r, p1_c], [p2_r, p2_c], [p3_r, p3_c], [p4_r, p4_c]], np.float32)
+#     # coord2 = [[q1_r, q1_c], [q2_r, q2_c], [q3_r, q3_c], [q4_r, q4_c]]
+#     coord2 = np.array([[0, 0], [0, width], [height, 0], [height, width]], np.float32)
+#
+#     mat = cv2.getPerspectiveTransform(coord1, coord2)
+#     trans_img = cv2.warpPerspective(cl_canny, mat, cl_canny.shape)
+#     bi_trans = convert_canny_to_bi(trans_img)
+#     loss = np.sum(bi_ebsd*bi_trans)
+#     if abs(sum(bi_ebsd) - loss) < 10:
+#         loss = 0
+#     return loss*-1
 
 
 # Returns n transformations from trans_arr with the highest loss values
 def calc_best_trans(trans_arr, n=1):
-    trans_loss = loss_func(trans_arr)
+    trans_loss = get_arr_loss(trans_arr)
     top_ind = np.argsort(trans_loss)[-n:]
     best_trans = []
     # Remark 8- make more elegant
@@ -201,40 +228,82 @@ def calc_best_trans(trans_arr, n=1):
     return best_trans
 
 
+# Three different ways to test registration results: 1. show_trans- displays registration
+#                                                    2. show_super_impose- superimposes registration & ebsd
+#                                                    3. show_traces- Displays intersection between registration canny
+#                                                                    and ebsd canny
+def test(trans, show_trans=True, show_super_impose=True, show_traces=True):
+    # trans_x, trans_y, deg, scale_x, scale_y = trans
+    trans_x, trans_y, deg = trans
+    scale_x = scale_y = 1
+
+    tran_mat = np.float32([[scale_x, 0, trans_x], [0, scale_y, trans_y]])
+    img = cv2.warpAffine(cl_canny, tran_mat, (width, height))
+    rot_mat = cv2.getRotationMatrix2D((cX, cY), deg, 1.0)
+    if show_trans:
+        tran = cv2.warpAffine(img, rot_mat, (width, height))
+        cv2.imshow('', tran)
+        cv2.waitKey(0)
+    if show_super_impose:
+        img1 = cv2.warpAffine(cl_img, tran_mat, (width, height))
+        tran1 = cv2.warpAffine(img1, rot_mat, (width, height))
+        super_impose = cv2.addWeighted(ebsd_img, 0.4, tran1, 0.5, 0)
+        cv2.imshow('superimpose_lim.png', super_impose)
+    if show_traces:
+        inter = tran & ebsd_canny
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        inter = cv2.dilate(inter, kernel, iterations=2)
+        ebsd_img[inter > 0] = [0, 0, 0]
+        # cv2.imwrite('overlap.png', ebsd_img)
+        cv2.imshow('overlap.png', ebsd_img)
+    cv2.waitKey(0)
+
+
 if __name__ == "__main__":
+    # pool = mp.Pool(mp.cpu_count() - 1)
+
     # Load Images
     ebsd_img, cl_img = load_images()
     ebsd_canny, cl_canny = get_canny_images()
+    bi_ebsd = convert_canny_to_bi(ebsd_canny)
 
     # Image dimensions
     height, width = cl_canny.shape
     (cX, cY) = (width // 2, height // 2)
 
-    # pool = mp.Pool(mp.cpu_count() - 1)
-    st = time.time()
 
+    # Custom Scheduled Optimisation
     transformation = find_best_trans()
     print(transformation)
 
-    et = time.time()
-    elapsed_time = et - st
-    print('Execution time:', elapsed_time, 'seconds')
-    # pool.close()
+    # Basin-Hopping Optimisation
+    # c1 = {'type': 'ineq', 'fun': lambda x: 1.5 - x[4]}
+    # c2 = {'type': 'ineq', 'fun': lambda x: x[4] - 0.8}
+    # c3 = {'type': 'ineq', 'fun': lambda x: 1.5 - x[3]}
+    # c4 = {'type': 'ineq', 'fun': lambda x: x[3] - 0.8}
+    # minimizer_kwargs = {"method": "COBYLA", "constraints": (c1, c2, c3, c4)}
+    # res = basinhopping(loss_func, (0, 0, 0, 1, 1), niter=100, minimizer_kwargs=minimizer_kwargs)
+    # print(res)
+    # [-1.97266734e-05,  9.99939793e-01,  6.40602132e-05,  1.00000373e+00, 1.00004322e+00] loss: -638301
 
-    # trans_arr = generate_transformations((-120, 120, 1), (-120, 120, 1), (-10, 10, 1))
-    # best = calc_best_trans(trans_arr)
-    # print(best)
+    # Simulated Annealing Optimisation
+    # inf = [-200, -200, -45]
+    # sup = [200, 200, 45]
+    # res = dual_annealing(loss_func, bounds=list(zip(inf, sup)))
+    # print(res)
+    # res w scaling: [-189.90122424, -193.72709634, 19.46906527, 0.83225369, 0.85481252] loss: -643987
+    # res w/o scaling: [-190.99317145, -198.98928199,  -36.87111562] loss: -643062
 
-    # Results: (-120, -110, 0, 0.7. 0.7)
-    # tran_mat = np.float32([[0.7, 0, -120], [0, 0.7, -110]])
-    # img = cv2.warpAffine(cl_img, tran_mat, (width, height))
-    # rot_mat = cv2.getRotationMatrix2D((cX, cY), 0, 1.0)
-    # tran = cv2.warpAffine(img, rot_mat, (width, height))
-    #
-    # super_impose = cv2.addWeighted(ebsd_img, 0.4, tran, 0.5, 0)
-    # cv2.imshow('super impose', super_impose)
-    #
-    # black = np.array([0, 0, 0])
-    # ebsd_img[inter > 0] = black
-    # cv2.imshow('', ebsd_img)
+    # Simulated Annealing Optimisation on perspective warp
+    # inf = [0, 0, width*(2/3), 0, 0, height*(2/3), width*(2/3), height*(2/3)]
+    # sup = [width//3, height//3, width, height//3, width//3, height, width, height]
+    # res = dual_annealing(loss_func, bounds=list(zip(inf, sup)))
+    # print(res)
+    # res: [9.36962564, 298.96559851, 1018.85279349, 305.04906874,
+    #         297.85357828,  962.34589884,  709.63185314,  957.34115835] loss: -636933
+    # coord1 = np.array([[9.36962564, 298.96559851], [1018.85279349, 305.04906874], [297.85357828, 962.34589884], [709.63185314, 957.34115835]], np.float32)
+    # coord2 = np.array([[0, 0], [0, width], [height, 0], [height, width]], np.float32)
+    # mat = cv2.getPerspectiveTransform(coord1, coord2)
+    # trans_img = cv2.warpPerspective(cl_img, mat, cl_canny.shape)
+    # cv2.imshow('', trans_img)
     # cv2.waitKey(0)
