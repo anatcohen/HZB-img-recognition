@@ -73,7 +73,9 @@ def get_canny_images():
 
 
 # Returns canny image of cl after having had given transformation applied to it
-def create_trans_img(trans):
+# def create_trans_img(trans):
+def create_trans_img(trans, cl_canny, dim):
+    width, height, cX, cY = dim
     translate_x, translate_y, degree, scale_x, scale_y = trans
     # translate_x, translate_y, degree = trans
     scale_x = scale_y = 1
@@ -183,16 +185,24 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
 
 # Returns loss val of each transformation in input array
 def get_arr_loss(trans_arr):
-    # results = [pool.apply(loss_func, args=(ebsd_canny, cl_canny, trans)) for trans in trans_arr]
+    # res = (trans, cl_canny, bi_ebsd) = ((int, int, int), np, np)
+    cl_arr = [cl_canny]*len(trans_arr)
+    bi_arr = [bi_ebsd]*len(trans_arr)
+    dim = [(width, height, cX, cY)]*len(trans_arr)
+    val = list(zip(trans_arr, cl_arr, bi_arr, dim))
+
     with Pool() as pool:
-        return pool.map(loss_func, trans_arr)
-    # return results
+        # results = [pool.apply(loss_func, args=(trans)) for trans in trans_arr]
+        results = pool.starmap(loss_func, val)
+    return results
     # return np.array([loss_func(trans) for trans in trans_arr])
 
 
 # Sums the multiplication of the transposed canny and ebsd canny. The higher, the better
-def loss_func(trans):
-    trans_img = create_trans_img(trans)
+# def loss_func(trans):
+def loss_func(trans, cl_canny, bi_ebsd, dim):
+    # trans_img = create_trans_img(trans)
+    trans_img = create_trans_img(trans, cl_canny, dim)
     bi_trans = convert_canny_to_bi(trans_img)
     # bi_ebsd = convert_canny_to_bi(ebsd_canny)
     loss = np.sum(bi_ebsd*bi_trans)
@@ -234,8 +244,8 @@ def calc_best_trans(trans_arr, n=1):
 #                                                                    and ebsd canny
 def test(trans, show_trans=True, show_super_impose=True, show_traces=True):
     # trans_x, trans_y, deg, scale_x, scale_y = trans
-    trans_x, trans_y, deg = trans
-    scale_x = scale_y = 1
+    trans_x, trans_y, deg, scale_x, scale_y = trans
+    # scale_x = scale_y = 1
 
     tran_mat = np.float32([[scale_x, 0, trans_x], [0, scale_y, trans_y]])
     img = cv2.warpAffine(cl_canny, tran_mat, (width, height))
@@ -260,8 +270,6 @@ def test(trans, show_trans=True, show_super_impose=True, show_traces=True):
 
 
 if __name__ == "__main__":
-    # pool = mp.Pool(mp.cpu_count() - 1)
-
     # Load Images
     ebsd_img, cl_img = load_images()
     ebsd_canny, cl_canny = get_canny_images()
@@ -271,10 +279,12 @@ if __name__ == "__main__":
     height, width = cl_canny.shape
     (cX, cY) = (width // 2, height // 2)
 
-
     # Custom Scheduled Optimisation
     transformation = find_best_trans()
     print(transformation)
+
+    # res; [40. ,  0. , -3. ,  1. ,  0.8]
+    # test([40. ,  0. , -3. ,  1. ,  0.8])
 
     # Basin-Hopping Optimisation
     # c1 = {'type': 'ineq', 'fun': lambda x: 1.5 - x[4]}
