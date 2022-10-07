@@ -12,35 +12,37 @@ ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
 orig_cl_path = 'Sequence/cl.png'
 
 # Transformation boundaries
-INF_TRANSLATE_X = -120
-SUP_TRANSLATE_X = 0
-INF_TRANSLATE_Y = -120
-SUP_TRANSLATE_Y = 0
+INF_TRANSLATE_X = -200
+SUP_TRANSLATE_X = 200
+
+INF_TRANSLATE_Y = -200
+SUP_TRANSLATE_Y = 200
+
 INF_ROTATION = -15
-SUP_ROTATION = 0
+SUP_ROTATION = 15
+
 INF_SCALE_X = 0.8
-SUP_SCALE_X = 1.5
+SUP_SCALE_X = 1.2
+
 INF_SCALE_Y = 0.8
-SUP_SCALE_Y = 1.5
+SUP_SCALE_Y = 1.2
 
 # Initial bounds
-TRANS_X_BOUNDS = (-150, 0, 20)
-TRANS_Y_BOUNDS = (-150, 0, 20)
-ROT_BOUNDS = (-15, 0, 3)
-SCALE_X_BOUNDS = (0.8, 1.2, 0.2)
-SCALE_Y_BOUNDS = (0.8, 1.2, 0.2)
+TRANS_X_BOUNDS = (INF_TRANSLATE_X, SUP_TRANSLATE_X, 5)
+TRANS_Y_BOUNDS = (INF_TRANSLATE_Y, SUP_TRANSLATE_Y, 5)
+ROT_BOUNDS = (INF_ROTATION, SUP_ROTATION, 5)
+SCALE_X_BOUNDS = (INF_SCALE_X, SUP_SCALE_X, 0.2)
+SCALE_Y_BOUNDS = (INF_SCALE_Y, SUP_SCALE_Y, 0.2)
+
+MIN_STEP = 1
+MIN_SCALE_STEP = 0.1
 
 # Indices
-MIN = 0
-MAX = 1
-STEP = 2
+STEP_IND = 2
 
 # Problems/Questions/Remarks:
 # 8. More elegant way to get transformations by indexes in find_best_trans?
-# 9. Change boundary constant to (-sup, sup, step) form
-# 15. Implement multiprocessing
 # 17. plot losses
-# 19. bad skewing values result in a black image
 # 20. Add resizing option for when original images aren't the same size
 
 
@@ -71,14 +73,13 @@ def get_canny_images():
     # Canny Images
     ebsd_canny = create_canny_img(ebsd_img)
     cl_canny = create_canny_img(cl_img)
-    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    # ebsd_canny = cv2.dilate(ebsd_canny, kernel, iterations=2)
     return ebsd_canny, cl_canny
 
 
 # Returns canny image of cl after having had given transformation applied to it
 # def create_trans_img(trans):
 def create_trans_img(trans, cl_canny, dim):
+    # def create_trans_img(trans):
     width, height, cX, cY = dim
     translate_x, translate_y, degree, scale_x, scale_y = trans
 
@@ -90,15 +91,6 @@ def create_trans_img(trans, cl_canny, dim):
     rot_mat = getRotationMatrix2D((cX, cY), degree, 1.0)
     trans_img = warpAffine(img, rot_mat, (width, height))
     return trans_img
-
-
-# Converts image array to a 1D binary array of {0,1}
-def convert_canny_to_bi(img):
-    flat_arr = img.flatten()
-    # Replace black pixels with 0 and white with 1
-    flat_arr[flat_arr == 0] = 1
-    flat_arr[flat_arr != 1] = 0
-    return flat_arr
 
 
 # Generates transformations within given boundaries and step size for translation, rotation and scale transformations
@@ -126,23 +118,24 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
 # Finds the best transformation for the registration according to the LOSS function
 def find_best_trans(n=1):
     best_trans = optimiser(n)
+    print(best_trans)
     ret_trans = calc_best_trans(best_trans)
     return ret_trans
 
 
 def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS, rot_bounds=ROT_BOUNDS,
               scale_x_bounds=SCALE_X_BOUNDS, scale_y_bounds=SCALE_Y_BOUNDS):
-    prev_trans_x_step = trans_x_bounds[STEP]
-    prev_trans_y_step = trans_y_bounds[STEP]
-    prev_rot_step = rot_bounds[STEP]
-    prev_scale_x_step = scale_x_bounds[STEP]
-    prev_scale_y_step = scale_y_bounds[STEP]
+    prev_trans_x_step = trans_x_bounds[STEP_IND]
+    prev_trans_y_step = trans_y_bounds[STEP_IND]
+    prev_rot_step = rot_bounds[STEP_IND]
+    prev_scale_x_step = scale_x_bounds[STEP_IND]
+    prev_scale_y_step = scale_y_bounds[STEP_IND]
 
     trans_arr = generate_transformations(trans_x_bounds, trans_y_bounds, rot_bounds, scale_x_bounds, scale_y_bounds)
     best_trans = calc_best_trans(trans_arr, n)
 
-    if prev_trans_x_step <= 1 and prev_trans_y_step <= 1 and prev_rot_step <= 1 and prev_scale_x_step <= 0.01 \
-            and prev_scale_y_step <= 0.01:
+    if prev_trans_x_step <= MIN_STEP and prev_trans_y_step <= MIN_STEP and prev_rot_step <= MIN_STEP and \
+            prev_scale_x_step <= MIN_SCALE_STEP and prev_scale_y_step <= MIN_SCALE_STEP:
         return best_trans
 
     ret_trans = []
@@ -153,7 +146,7 @@ def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS,
             get_new_boundaries(trans, prev_trans_x_step, prev_trans_y_step, prev_rot_step, prev_scale_x_step,
                                prev_scale_y_step)
         new_trans = optimiser(n, new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds,
-                                           new_scale_y_bounds)
+                              new_scale_y_bounds)
         ret_trans.extend(new_trans)
 
     ret_trans = np.array(ret_trans)
@@ -165,23 +158,26 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
     x, y, deg, scale_x, scale_y = trans
     new_trans_x_inf = max(x-trans_x_step, INF_TRANSLATE_X)
     new_trans_x_sup = min(x+trans_x_step, SUP_TRANSLATE_X)
-    new_trans_x_bounds = (new_trans_x_inf, new_trans_x_sup, trans_x_step//2)
+    new_trans_x_step = max(MIN_STEP, trans_x_step//2)
+    new_trans_x_bounds = (new_trans_x_inf, new_trans_x_sup, new_trans_x_step)
 
     new_trans_y_inf = max(y-trans_y_step, INF_TRANSLATE_Y)
     new_trans_y_sup = min(y+trans_y_step, SUP_TRANSLATE_Y)
-    new_trans_y_bounds = (new_trans_y_inf, new_trans_y_sup, trans_y_step//2)
+    new_trans_y_step = max(MIN_STEP, trans_y_step//2)
+    new_trans_y_bounds = (new_trans_y_inf, new_trans_y_sup, new_trans_y_step)
 
     new_rot_inf = max(deg-rot_step, INF_ROTATION)
     new_rot_sup = min(deg+rot_step, SUP_ROTATION)
-    new_rot_bounds = (new_rot_inf, new_rot_sup, trans_y_step//2)
+    new_rot_step = max(MIN_STEP, rot_step//2)
+    new_rot_bounds = (new_rot_inf, new_rot_sup, new_rot_step)
 
     new_scale_x_inf = max(scale_x-scale_x_step, INF_SCALE_X)
     new_scale_x_sup = min(scale_x+scale_x_step, SUP_SCALE_X)
-    new_scale_x_bounds = (new_scale_x_sup, new_scale_x_inf, scale_x_step/2)
+    new_scale_x_bounds = (new_scale_x_inf, new_scale_x_sup, scale_x_step/2)
 
     new_scale_y_inf = max(scale_y-scale_y_step, INF_SCALE_Y)
     new_scale_y_sup = min(scale_y+scale_y_step, SUP_SCALE_Y)
-    new_scale_y_bounds = (new_scale_y_sup, new_scale_y_inf, scale_y_step/2)
+    new_scale_y_bounds = (new_scale_y_inf, new_scale_y_sup, scale_y_step/2)
 
     return new_trans_x_bounds, new_trans_y_bounds, new_rot_bounds, new_scale_x_bounds, new_scale_y_bounds
 
@@ -190,7 +186,6 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
 def get_arr_loss(trans_arr):
     # Zipping the global arguments for multiprocessing to work
     cl_arr = [cl_canny]*len(trans_arr)
-    # bi_arr = [bi_ebsd]*len(trans_arr)
     ebsd_arr = [ebsd_canny]*len(trans_arr)
     dim = [(width, height, cX, cY)]*len(trans_arr)
     args = list(zip(trans_arr, cl_arr, ebsd_arr, dim))
@@ -201,20 +196,11 @@ def get_arr_loss(trans_arr):
     # return np.array([loss_func(trans) for trans in trans_arr])
 
 
-# Old loss func
-# def loss_func(trans):
-# def loss_func(trans, cl_canny, bi_ebsd, dim):
-    # trans_img = create_trans_img(trans)
-    # trans_img = create_trans_img(trans, cl_canny, dim)
-    # bi_trans = convert_canny_to_bi(trans_img)
-    # loss = np.sum(bi_ebsd*bi_trans)
-    # if sum(bi_ebsd) - loss < 25:
-    #     loss = 0
-    # return loss*-1
-
 # Sums the multiplication of the transposed canny and ebsd canny. The higher, the better
 def loss_func(trans, cl_canny, ebsd_canny, dim):
+# def loss_func(trans):
     trans_canny = create_trans_img(trans, cl_canny, dim)
+    # trans_canny = create_trans_img(trans)
     inter = ebsd_canny & trans_canny
     flat_arr = inter.flatten()
     flat_arr[flat_arr != 0] = 1
@@ -240,13 +226,11 @@ def loss_func(trans, cl_canny, ebsd_canny, dim):
 # Returns n transformations from trans_arr with the highest loss values
 def calc_best_trans(trans_arr, n=1):
     trans_loss = get_arr_loss(trans_arr)
-    # top_ind = np.argsort(trans_loss)[-n:]
     top_ind = np.argsort(trans_loss)[:n]
     best_trans = []
     # Remark 8- make more elegant
     for i in top_ind:
         best_trans.append((trans_arr[i]))
-        # print(trans_loss[i])
 
     return best_trans
 
@@ -256,9 +240,10 @@ def calc_best_trans(trans_arr, n=1):
 #                                                    3. show_traces- Displays intersection between registration canny
 #                                                                    and ebsd canny
 def test(trans, show_trans=True, show_super_impose=True, show_traces=True):
-    # trans_x, trans_y, deg, scale_x, scale_y = trans
     trans_x, trans_y, deg, scale_x, scale_y = trans
-    # scale_x = scale_y = 1
+
+    loss = loss_func(trans, cl_canny, ebsd_canny, dim)
+    print('loss: ' + str(loss))
 
     tran_mat = np.float32([[scale_x, 0, trans_x], [0, scale_y, trans_y]])
     img = cv2.warpAffine(cl_canny, tran_mat, (width, height))
@@ -286,7 +271,6 @@ if __name__ == "__main__":
     # Load Images
     ebsd_img, cl_img = load_images()
     ebsd_canny, cl_canny = get_canny_images()
-    # bi_ebsd = convert_canny_to_bi(ebsd_canny)
 
     # Image dimensions
     height, width = cl_canny.shape
@@ -294,5 +278,7 @@ if __name__ == "__main__":
     dim = (width, height, cX, cY)
 
     # Truth loss: -144333
-    # transformation = find_best_trans()
+    # transformation = find_best_trans(2)
     # print(transformation)
+
+    # test([28. , -33. ,   6. ,   1.2,   1.2])
