@@ -7,8 +7,8 @@ from multiprocessing import Pool
 import multiprocessing as mp
 
 # Image Paths
-truth_path = 'data/affine_reg.png'
-ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
+# truth_path = 'data/affine_reg.png'
+o_ebsd_path = 'Sequence/EBSD_09-07-29_1415-13_Map1-2-3-4_corr-BC-IPF-GB_crop.png'
 orig_cl_path = 'Sequence/cl.png'
 
 # Transformation boundaries
@@ -28,8 +28,8 @@ INF_SCALE_Y = 0.8
 SUP_SCALE_Y = 1.2
 
 # Initial bounds
-TRANS_X_BOUNDS = (INF_TRANSLATE_X, SUP_TRANSLATE_X, 5)
-TRANS_Y_BOUNDS = (INF_TRANSLATE_Y, SUP_TRANSLATE_Y, 5)
+TRANS_X_BOUNDS = (INF_TRANSLATE_X, SUP_TRANSLATE_X, 20)
+TRANS_Y_BOUNDS = (INF_TRANSLATE_Y, SUP_TRANSLATE_Y, 20)
 ROT_BOUNDS = (INF_ROTATION, SUP_ROTATION, 5)
 SCALE_X_BOUNDS = (INF_SCALE_X, SUP_SCALE_X, 0.2)
 SCALE_Y_BOUNDS = (INF_SCALE_Y, SUP_SCALE_Y, 0.2)
@@ -47,9 +47,9 @@ STEP_IND = 2
 
 
 # Loads cl and ebsd images by path
-def load_images():
+def load_images(ebsd_path, cl_path):
     ebsd = cv2.imread(ebsd_path)
-    cl = cv2.imread(orig_cl_path)
+    cl = cv2.imread(cl_path)
     return ebsd, cl
 
 
@@ -69,7 +69,7 @@ def create_canny_img(img):
 
 
 # Returns canny images of ebsd and cl
-def get_canny_images():
+def get_canny_images(ebsd_img, cl_img):
     # Canny Images
     ebsd_canny = create_canny_img(ebsd_img)
     cl_canny = create_canny_img(cl_img)
@@ -116,14 +116,13 @@ def generate_transformations(translate_x_bounds=TRANS_X_BOUNDS, translate_y_boun
 
 
 # Finds the best transformation for the registration according to the LOSS function
-def find_best_trans(n=1):
-    best_trans = optimiser(n)
-    print(best_trans)
-    ret_trans = calc_best_trans(best_trans)
+def find_best_trans(cl_canny, ebsd_canny, dim, n=1):
+    best_trans = optimiser(cl_canny, ebsd_canny, dim, n)
+    ret_trans = calc_best_trans(cl_canny, ebsd_canny, dim, best_trans)
     return ret_trans
 
 
-def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS, rot_bounds=ROT_BOUNDS,
+def optimiser(cl_canny, ebsd_canny, dim, n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS, rot_bounds=ROT_BOUNDS,
               scale_x_bounds=SCALE_X_BOUNDS, scale_y_bounds=SCALE_Y_BOUNDS):
     prev_trans_x_step = trans_x_bounds[STEP_IND]
     prev_trans_y_step = trans_y_bounds[STEP_IND]
@@ -132,7 +131,7 @@ def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS,
     prev_scale_y_step = scale_y_bounds[STEP_IND]
 
     trans_arr = generate_transformations(trans_x_bounds, trans_y_bounds, rot_bounds, scale_x_bounds, scale_y_bounds)
-    best_trans = calc_best_trans(trans_arr, n)
+    best_trans = calc_best_trans(cl_canny, ebsd_canny, dim, trans_arr, n)
 
     if prev_trans_x_step <= MIN_STEP and prev_trans_y_step <= MIN_STEP and prev_rot_step <= MIN_STEP and \
             prev_scale_x_step <= MIN_SCALE_STEP and prev_scale_y_step <= MIN_SCALE_STEP:
@@ -145,7 +144,7 @@ def optimiser(n=1, trans_x_bounds=TRANS_X_BOUNDS, trans_y_bounds=TRANS_Y_BOUNDS,
         new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds, new_scale_y_bounds = \
             get_new_boundaries(trans, prev_trans_x_step, prev_trans_y_step, prev_rot_step, prev_scale_x_step,
                                prev_scale_y_step)
-        new_trans = optimiser(n, new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds,
+        new_trans = optimiser(cl_canny, ebsd_canny, dim, n, new_trans_x_bound, new_trans_y_bound, new_rot_bounds, new_scale_x_bounds,
                               new_scale_y_bounds)
         ret_trans.extend(new_trans)
 
@@ -183,11 +182,11 @@ def get_new_boundaries(trans, trans_x_step, trans_y_step, rot_step, scale_x_step
 
 
 # Returns loss val of each transformation in input array
-def get_arr_loss(trans_arr):
+def get_arr_loss(cl_canny, ebsd_canny, dim, trans_arr):
     # Zipping the global arguments for multiprocessing to work
     cl_arr = [cl_canny]*len(trans_arr)
     ebsd_arr = [ebsd_canny]*len(trans_arr)
-    dim = [(width, height, cX, cY)]*len(trans_arr)
+    dim = [dim]*len(trans_arr)
     args = list(zip(trans_arr, cl_arr, ebsd_arr, dim))
 
     with Pool(mp.cpu_count() - 1) as pool:
@@ -198,7 +197,6 @@ def get_arr_loss(trans_arr):
 
 # Sums the multiplication of the transposed canny and ebsd canny. The higher, the better
 def loss_func(trans, cl_canny, ebsd_canny, dim):
-# def loss_func(trans):
     trans_canny = create_trans_img(trans, cl_canny, dim)
     # trans_canny = create_trans_img(trans)
     inter = ebsd_canny & trans_canny
@@ -207,25 +205,10 @@ def loss_func(trans, cl_canny, ebsd_canny, dim):
     loss = np.sum(flat_arr)
     return loss*-1
 
-# Simulated Annealing Optimiser LOSS function
-# def loss_func(pts):
-#     p1_r, p1_c, p2_r, p2_c, p3_r, p3_c, p4_r, p4_c = pts
-#     coord1 = np.array([[p1_r, p1_c], [p2_r, p2_c], [p3_r, p3_c], [p4_r, p4_c]], np.float32)
-#     # coord2 = [[q1_r, q1_c], [q2_r, q2_c], [q3_r, q3_c], [q4_r, q4_c]]
-#     coord2 = np.array([[0, 0], [0, width], [height, 0], [height, width]], np.float32)
-#
-#     mat = cv2.getPerspectiveTransform(coord1, coord2)
-#     trans_img = cv2.warpPerspective(cl_canny, mat, cl_canny.shape)
-#     bi_trans = convert_canny_to_bi(trans_img)
-#     loss = np.sum(bi_ebsd*bi_trans)
-#     if abs(sum(bi_ebsd) - loss) < 10:
-#         loss = 0
-#     return loss*-1
-
 
 # Returns n transformations from trans_arr with the highest loss values
-def calc_best_trans(trans_arr, n=1):
-    trans_loss = get_arr_loss(trans_arr)
+def calc_best_trans(cl_canny, ebsd_canny, dim, trans_arr, n=1):
+    trans_loss = get_arr_loss(cl_canny, ebsd_canny, dim, trans_arr)
     top_ind = np.argsort(trans_loss)[:n]
     best_trans = []
     # Remark 8- make more elegant
@@ -235,50 +218,43 @@ def calc_best_trans(trans_arr, n=1):
     return best_trans
 
 
-# Three different ways to test registration results: 1. show_trans- displays registration
-#                                                    2. show_super_impose- superimposes registration & ebsd
-#                                                    3. show_traces- Displays intersection between registration canny
-#                                                                    and ebsd canny
-def test(trans, show_trans=True, show_super_impose=True, show_traces=True):
+# Returns super impose image and intersection of canny images
+def test(trans, ebsd_img, cl_img, ebsd_canny, cl_canny, dim):
     trans_x, trans_y, deg, scale_x, scale_y = trans
+    width, height, cX, cY = dim
 
-    loss = loss_func(trans, cl_canny, ebsd_canny, dim)
-    print('loss: ' + str(loss))
+    # loss = loss_func(trans, cl_canny, ebsd_canny, dim)
+    # print('loss: ' + str(loss))
 
     tran_mat = np.float32([[scale_x, 0, trans_x], [0, scale_y, trans_y]])
+    img = cv2.warpAffine(cl_img, tran_mat, (width, height))
+
+    super_impose = cv2.addWeighted(ebsd_img, 0.4, img, 0.5, 0)
+
     img = cv2.warpAffine(cl_canny, tran_mat, (width, height))
-    rot_mat = cv2.getRotationMatrix2D((cX, cY), deg, 1.0)
-    if show_trans:
-        tran = cv2.warpAffine(img, rot_mat, (width, height))
-        cv2.imshow('', tran)
-        cv2.waitKey(0)
-    if show_super_impose:
-        img1 = cv2.warpAffine(cl_img, tran_mat, (width, height))
-        tran1 = cv2.warpAffine(img1, rot_mat, (width, height))
-        super_impose = cv2.addWeighted(ebsd_img, 0.4, tran1, 0.5, 0)
-        cv2.imshow('superimpose_lim.png', super_impose)
-    if show_traces:
-        inter = tran & ebsd_canny
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        inter = cv2.dilate(inter, kernel, iterations=2)
-        ebsd_img[inter > 0] = [0, 0, 0]
-        # cv2.imwrite('overlap.png', ebsd_img)
-        cv2.imshow('overlap.png', ebsd_img)
-    cv2.waitKey(0)
+    inter = img & ebsd_canny
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    inter = cv2.dilate(inter, kernel, iterations=2)
+    ebsd = ebsd_img.copy()
+    ebsd[inter > 0] = [0, 0, 0]
+
+    return ebsd, super_impose
 
 
-if __name__ == "__main__":
-    # Load Images
-    ebsd_img, cl_img = load_images()
-    ebsd_canny, cl_canny = get_canny_images()
+def get_reg_and_tests(ebsd_path, cl_path):
+    ebsd_img, cl_img = load_images(ebsd_path, cl_path)
+    ebsd_canny, cl_canny = get_canny_images(ebsd_img, cl_img)
 
     # Image dimensions
     height, width = cl_canny.shape
     (cX, cY) = (width // 2, height // 2)
     dim = (width, height, cX, cY)
 
-    # Truth loss: -144333
-    # transformation = find_best_trans(2)
-    # print(transformation)
+    trans = find_best_trans(cl_canny, ebsd_canny, dim)[0]
+    # print(trans)
+    # trans = [ 29.    , -35.    ,   6.    ,   1.1875,   1.2   ]
 
-    # test([28. , -33. ,   6. ,   1.2,   1.2])
+    reg_img = create_trans_img(trans, cl_img, dim)
+    intersect, super_impose = test(trans, ebsd_img, cl_img, ebsd_canny, cl_canny, dim)
+
+    return reg_img, intersect, super_impose
